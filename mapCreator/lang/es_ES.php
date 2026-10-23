@@ -26,7 +26,6 @@ $i18n = array (
 	"LANG_Height_Preset"        => "Preajuste de Altura / Relación de Aspecto",
 	"LANG_Fixed_Pixels"         => "Píxeles Fijos (px)",
 	"LANG_Viewport_Height"      => "Altura de Ventana (vh)",
-	"LANG_Percentage"           => "Porcentaje (%)",
 	"LANG_Ratio_16_9"           => "Relación de Aspecto 16:9",
 	"LANG_Ratio_4_3"            => "Relación de Aspecto 4:3",
 	"LANG_Ratio_1_1"            => "Relación de Aspecto 1:1",

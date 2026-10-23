@@ -26,7 +26,6 @@ $i18n = array (
 	"LANG_Height_Preset"        => "Height / Aspect Ratio Preset",
 	"LANG_Fixed_Pixels"         => "Fixed Pixels (px)",
 	"LANG_Viewport_Height"      => "Viewport Height (vh)",
-	"LANG_Percentage"           => "Percentage (%)",
 	"LANG_Ratio_16_9"           => "Aspect Ratio 16:9",
 	"LANG_Ratio_4_3"            => "Aspect Ratio 4:3",
 	"LANG_Ratio_1_1"            => "Aspect Ratio 1:1",

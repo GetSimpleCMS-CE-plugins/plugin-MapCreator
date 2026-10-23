@@ -74,9 +74,14 @@ function renderMapHtmlAndScript($mapId, $mapData) {
 	$useClustering = (!isset($mapData['clustering']) || $mapData['clustering'] === 'true' || $mapData['clustering'] === true);
 
 	$containerStyle = "width:100%;";
+
 	if (!empty($aspectRatio)) {
 		$containerStyle .= "aspect-ratio:" . str_replace(':', '/', $aspectRatio) . ";";
 	} else {
+		// Fallback for legacy % heights to prevent collapsed containers
+		if (substr($heightVal, -1) === '%') {
+			$heightVal = '400px';
+		}
 		$containerStyle .= "height:" . $heightVal . ";";
 	}
 
@@ -122,7 +127,6 @@ function renderMapHtmlAndScript($mapId, $mapData) {
 		$output .= "    mapInstance.addLayer(markerGroup);\n";
 	}
 
-	// Open popups after layer addition and size invalidation
 	$output .= "    setTimeout(function() {\n";
 	$output .= "        mapInstance.invalidateSize();\n";
 	$output .= "        autoOpenMarkers.forEach(function(m) { m.openPopup(); });\n";
@@ -145,7 +149,8 @@ function parseLegacyMapTxt($content) {
 	);
 
 	if (preg_match('/height:\s*([^;}]+)/i', $content, $m)) {
-		$data['height'] = trim($m[1]);
+		$val = trim($m[1]);
+		$data['height'] = (substr($val, -1) === '%') ? '400px' : $val;
 	}
 	if (preg_match('/center:\s*\[([^\]]+)\]/i', $content, $m)) {
 		$data['center'] = trim($m[1]);
@@ -199,7 +204,8 @@ function mapCreator()
 			$aspectRatio = str_replace('ratio:', '', $heightChoice);
 		} else {
 			$numeric = is_numeric($_POST['height_val']) ? $_POST['height_val'] : '400';
-			$finalHeight = $numeric . $heightChoice;
+			$unit = in_array($heightChoice, array('px', 'vh')) ? $heightChoice : 'px';
+			$finalHeight = $numeric . $unit;
 		}
 
 		$points = array();
@@ -317,10 +323,12 @@ function mapCreator()
 						$aspect = isset($editingData['aspectRatio']) ? $editingData['aspectRatio'] : 'none';
 						$currHeight = isset($editingData['height']) ? $editingData['height'] : '400px';
 						$currUnit = preg_replace('/[0-9]/', '', $currHeight) ?: 'px';
+						if (!in_array($currUnit, array('px', 'vh'))) {
+							$currUnit = 'px';
+						}
 					?>
 					<option value="px" <?php echo ($aspect === 'none' && $currUnit === 'px') ? 'selected' : ''; ?>><?php echo i18n_r('mapCreator/LANG_Fixed_Pixels'); ?></option>
 					<option value="vh" <?php echo ($aspect === 'none' && $currUnit === 'vh') ? 'selected' : ''; ?>><?php echo i18n_r('mapCreator/LANG_Viewport_Height'); ?></option>
-					<option value="%" <?php echo ($aspect === 'none' && $currUnit === '%') ? 'selected' : ''; ?>><?php echo i18n_r('mapCreator/LANG_Percentage'); ?></option>
 					<option value="ratio:16:9" <?php echo ($aspect === '16:9') ? 'selected' : ''; ?>><?php echo i18n_r('mapCreator/LANG_Ratio_16_9'); ?></option>
 					<option value="ratio:4:3" <?php echo ($aspect === '4:3') ? 'selected' : ''; ?>><?php echo i18n_r('mapCreator/LANG_Ratio_4_3'); ?></option>
 					<option value="ratio:1:1" <?php echo ($aspect === '1:1') ? 'selected' : ''; ?>><?php echo i18n_r('mapCreator/LANG_Ratio_1_1'); ?></option>

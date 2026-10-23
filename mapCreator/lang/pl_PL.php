@@ -26,7 +26,6 @@ $i18n = array (
 	"LANG_Height_Preset"        => "Ustawienie Wysokości / Proporcji",
 	"LANG_Fixed_Pixels"         => "Stałe Piksele (px)",
 	"LANG_Viewport_Height"      => "Wysokość Okna (vh)",
-	"LANG_Percentage"           => "Procent (%)",
 	"LANG_Ratio_16_9"           => "Proporcje 16:9",
 	"LANG_Ratio_4_3"            => "Proporcje 4:3",
 	"LANG_Ratio_1_1"            => "Proporcje 1:1",
