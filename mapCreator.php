@@ -8,237 +8,512 @@ i18n_merge('mapCreator') || i18n_merge('mapCreator', 'en_US');
 
 # register plugin
 register_plugin(
-	$thisfile, //Plugin id
-	'MapCreator', 	//Plugin name
-	'5.0', 		//Plugin version
-	'Multicolor',  //Plugin author
-	'https://discord.gg/vkySHPxpg2', //author website
-	i18n_r('readTime/LANG_Description'), //Plugin description
-	'plugins', //page type - on which admin tab to display
-	'mapCreator'  //main function (administration)
+	$thisfile,
+	'MapCreator',
+	'6.0',
+	'Multicolor',
+	'https://discord.gg/vkySHPxpg2',
+	i18n_r('mapCreator/LANG_Description'),
+	'plugins',
+	'mapCreator'
 );
 
-#script
-register_style('mapcreator', $SITEURL . 'plugins/mapCreator/css/leaflet.css', '1.0', 'all');
-queue_style('mapcreator', GSFRONT);
+# Register local Leaflet styles & scripts (1.9.4)
+register_style('leaflet-css', $SITEURL . 'plugins/mapCreator/css/leaflet.css', '1.9.4', 'all');
+register_script('leaflet-js', $SITEURL . 'plugins/mapCreator/js/leaflet.js', '1.9.4', false);
 
-#nav
+# Register MarkerCluster styles & scripts
+register_style('leaflet-cluster-css', $SITEURL . 'plugins/mapCreator/css/MarkerCluster.css', '1.5.3', 'all');
+register_style('leaflet-cluster-default-css', $SITEURL . 'plugins/mapCreator/css/MarkerCluster.Default.css', '1.5.3', 'all');
+register_script('leaflet-cluster-js', $SITEURL . 'plugins/mapCreator/js/leaflet.markercluster.js', '1.5.3', false);
+
+# Enqueue for both frontend and admin backend
+queue_style('leaflet-css', GSFRONT);
+queue_script('leaflet-js', GSFRONT);
+queue_style('leaflet-cluster-css', GSFRONT);
+queue_style('leaflet-cluster-default-css', GSFRONT);
+queue_script('leaflet-cluster-js', GSFRONT);
+
+queue_style('leaflet-css', GSBACK);
+queue_script('leaflet-js', GSBACK);
+queue_style('leaflet-cluster-css', GSBACK);
+queue_style('leaflet-cluster-default-css', GSBACK);
+queue_script('leaflet-cluster-js', GSBACK);
+
+# Admin sidebar navigation
 add_action('plugins-sidebar', 'createSideMenu', array($thisfile, i18n_r('mapCreator/LANG_Settings')));
 
+function getSvgMarkerScript() {
+	return "
+	function createColorIcon(colorHex) {
+		const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 44' width='32' height='44'>
+			<defs>
+				<filter id='dropShadow' x='-20%' y='-20%' width='150%' height='150%'>
+					<feDropShadow dx='1' dy='3' stdDeviation='2' flood-color='#000000' flood-opacity='0.4'/>
+				</filter>
+			</defs>
+			<path d='M16 2 C8.82 2 3 7.82 3 15 C3 24.5 16 40 16 40 S29 24.5 29 15 C29 7.82 23.18 2 16 2 Z' 
+				  fill='` + colorHex + `' stroke='#ffffff' stroke-width='1.5' filter='url(#dropShadow)'/>
+			<circle cx='16' cy='15' r='5' fill='#ffffff'/>
+		</svg>`;
+		return L.icon({
+			iconUrl: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg),
+			iconSize: [32, 44],
+			iconAnchor: [16, 40],
+			popupAnchor: [0, -36]
+		});
+	}";
+}
+
+function renderMapHtmlAndScript($mapId, $mapData) {
+	$heightVal = htmlspecialchars($mapData['height']);
+	$aspectRatio = isset($mapData['aspectRatio']) && $mapData['aspectRatio'] !== 'none' ? $mapData['aspectRatio'] : '';
+	$center = !empty($mapData['center']) ? $mapData['center'] : '51.505, -0.09';
+	$zoom = intval($mapData['zoom']);
+	$scroll = ($mapData['mousescroll'] === 'true' || $mapData['mousescroll'] === true) ? 'true' : 'false';
+	$useClustering = (!isset($mapData['clustering']) || $mapData['clustering'] === 'true' || $mapData['clustering'] === true);
+
+	$containerStyle = "width:100%;";
+	if (!empty($aspectRatio)) {
+		$containerStyle .= "aspect-ratio:" . str_replace(':', '/', $aspectRatio) . ";";
+	} else {
+		$containerStyle .= "height:" . $heightVal . ";";
+	}
+
+	$jsonPoints = json_encode(isset($mapData['points']) ? $mapData['points'] : array());
+
+	$output = "<div id='" . $mapId . "' style='" . $containerStyle . "'></div>\n";
+	$output .= "<script>\n";
+	$output .= "document.addEventListener('DOMContentLoaded', function() {\n";
+	$output .= getSvgMarkerScript() . "\n";
+	$output .= "    var mapInstance = L.map('" . $mapId . "', {\n";
+	$output .= "        center: [" . $center . "],\n";
+	$output .= "        zoom: " . $zoom . ",\n";
+	$output .= "        scrollWheelZoom: " . $scroll . "\n";
+	$output .= "    });\n";
+	$output .= "    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {\n";
+	$output .= "        maxZoom: 19,\n";
+	$output .= "        attribution: '&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a>'\n";
+	$output .= "    }).addTo(mapInstance);\n";
+
+	if ($useClustering) {
+		$output .= "    var markerGroup = L.markerClusterGroup();\n";
+	} else {
+		$output .= "    var markerGroup = mapInstance;\n";
+	}
+
+	$output .= "    var points = " . $jsonPoints . ";\n";
+	$output .= "    var autoOpenMarkers = [];\n";
+	$output .= "    points.forEach(function(pt) {\n";
+	$output .= "        if (!pt.coords) return;\n";
+	$output .= "        var coords = pt.coords.split(',').map(Number);\n";
+	$output .= "        var markerOptions = {};\n";
+	$output .= "        if (pt.color) { markerOptions.icon = createColorIcon(pt.color); }\n";
+	$output .= "        var marker = L.marker(coords, markerOptions).addTo(markerGroup);\n";
+	$output .= "        if (pt.popup) {\n";
+	$output .= "            marker.bindPopup(pt.popup, { autoClose: false, closeOnClick: false });\n";
+	$output .= "            if (pt.showPopup === true || pt.showPopup === 'true' || pt.showPopup === '1' || pt.showPopup === 1) {\n";
+	$output .= "                autoOpenMarkers.push(marker);\n";
+	$output .= "            }\n";
+	$output .= "        }\n";
+	$output .= "    });\n";
+
+	if ($useClustering) {
+		$output .= "    mapInstance.addLayer(markerGroup);\n";
+	}
+
+	// Open popups after layer addition and size invalidation
+	$output .= "    setTimeout(function() {\n";
+	$output .= "        mapInstance.invalidateSize();\n";
+	$output .= "        autoOpenMarkers.forEach(function(m) { m.openPopup(); });\n";
+	$output .= "    }, 250);\n";
+	$output .= "});\n";
+	$output .= "</script>\n";
+
+	return $output;
+}
+
+function parseLegacyMapTxt($content) {
+	$data = array(
+		'height' => '400px',
+		'aspectRatio' => 'none',
+		'zoom' => 13,
+		'center' => '51.505, -0.09',
+		'mousescroll' => 'false',
+		'clustering' => 'true',
+		'points' => array()
+	);
+
+	if (preg_match('/height:\s*([^;}]+)/i', $content, $m)) {
+		$data['height'] = trim($m[1]);
+	}
+	if (preg_match('/center:\s*\[([^\]]+)\]/i', $content, $m)) {
+		$data['center'] = trim($m[1]);
+	}
+	if (preg_match('/zoom:\s*([0-9]+)/i', $content, $m)) {
+		$data['zoom'] = intval($m[1]);
+	}
+	if (preg_match('/scrollWheelZoom:\s*(true|false)/i', $content, $m)) {
+		$data['mousescroll'] = $m[1];
+	}
+
+	preg_match_all('/L\.marker\(\[([^\]]+)\]\)(?:\.addTo\([^)]+\))?(?:\.bindPopup\((.*?)(?:,\s*\{[^}]*\})?\))?(\.openPopup\(\))?/is', $content, $matches, PREG_SET_ORDER);
+	foreach ($matches as $match) {
+		$popupHtml = '';
+		if (!empty($match[2])) {
+			$raw = trim($match[2]);
+			if (substr($raw, 0, 1) === '`' && substr($raw, -1) === '`') {
+				$popupHtml = substr($raw, 1, -1);
+			} else {
+				$popupHtml = json_decode($raw, true) ?: trim($raw, "\"'");
+			}
+		}
+		$isOpen = !empty($match[3]);
+		$data['points'][] = array(
+			'coords' => trim($match[1]),
+			'popup' => $popupHtml,
+			'showPopup' => $isOpen,
+			'color' => '#2A81CB'
+		);
+	}
+
+	return $data;
+}
 
 function mapCreator()
 {
 	global $SITEURL;
-
-	$html = '<link rel="stylesheet" href="' . $SITEURL . 'plugins/mapCreator/css/leaflet.css">';
-
-	$html .= '<link rel="stylesheet" href="https://unicons.iconscout.com/release/v4.0.0/css/line.css">
-
-		<style>.mapcreator .uil{font-size:1.1rem}</style>
-
-		<h3>' . i18n_r('mapCreator/LANG_Create_Map') . '  📍</h3>
-		<div style="margin:10px 0; display:block; width:100%; border:solid 1px #ddd; background:#fafafa; margin-bottom:15px; padding:10px; box-sizing:border-box;">
-	  
-			<h3>' . i18n_r('mapCreator/LANG_Get_Coordinates') . ':</h3>
-
-			<ul>
-				<li>' . i18n_r('mapCreator/LANG_In_Browser') . ' <a href="https://www.google.com/maps" target="_blank">' . i18n_r('mapCreator/LANG_Google_Maps') . '</a>.</li>
-				<li>' . i18n_r('mapCreator/LANG_Right_Click') . '</li>
-				<li>' . i18n_r('mapCreator/LANG_Open_Popup') . '</li>
-				<li>' . i18n_r('mapCreator/LANG_Copy_Coordinates') . '</li>
-				<li>' . i18n_r('mapCreator/LANG_Paste_into') . '</li>
-			</ul>
-		
-		</div>
-
-		<form method="POST" action="#" class="mapcreator" style="background:#fafafa; border:solid 1px #ddd; box-sizing:border-box; padding:10px;">
-		
-			<i class="uil uil-info-circle" style="padding-right:10px;"></i><input type="text" name="namemap" required placeholder="' . i18n_r('mapCreator/LANG_Map_Name') . '" style="padding:5px; width:95%; margin-bottom:10px; box-sizing:border-box;">
-			
-			<i class="uil uil-arrows-shrink-v" style="padding-right:10px;"></i><input type="text" name="height"  required placeholder="' . i18n_r('mapCreator/LANG_Map_Height') . '" style="padding:5px; width:95%; box-sizing:border-box; margin-bottom:10px;">
-			
-			<i class="uil uil-search-plus" style="padding-right:10px;"></i><input type="text" name="zoom"  required placeholder="' . i18n_r('mapCreator/LANG_Map_Zoom') . '" style="padding:5px; width:95%; box-sizing:border-box; margin-bottom:10px;">
-
-			<i class="uil uil-map" style="padding-right:10px;"></i><input type="text" name="localization"  required placeholder="' . i18n_r('mapCreator/LANG_Map_Center') . '" style="padding:5px; width:95%; box-sizing:border-box; margin-bottom:10px;">
-
-			<p style="margin:0; margin-bottom:10px;"> ' . i18n_r('mapCreator/LANG_Mouse_Scroll') . '</p>
-
-			<i class="uil uil-mouse" style="padding-right:10px;"></i> <select name="mousescroll" style="padding:6px; display:inline-block; width:95%; box-sizing:border-box; margin-bottom:10px; border:solid 1px rgba(0,0,0,0.3); background:#fff;">
-				<option value="true">' . i18n_r('mapCreator/LANG_Yes') . '</option>
-				<option value="false">' . i18n_r('mapCreator/LANG_No') . '</option>
-			</select>
-
-			<div style="display:flex; align-items:center; justify-content:space-between; background-image:linear-gradient(to right,#ddd,transparent); border-right:none; padding:10px; width:96%; margin-left:0; border-left:5px solid #D61C4E; margin-top:10px;">
-				<b>' . i18n_r('mapCreator/LANG_Add_Point_on_Map') . '</b><br> 
-				<button class="addnewpoint" style="background:#D61C4E; color:#fff; border:none; padding:10px; cursor: pointer;" title="' . i18n_r('mapCreator/LANG_Add_Point') . '"><i class="uil uil-plus-square"></i></button>
-			</div>
-
-			<div class="nextpoint"></div>
-			<div style="width:100%; height:30px"></div>
-
-			<input type="submit" style="background:#000; color:#fff; padding:10px 15px; border:none; margin-top:15px; cursor: pointer;" value="' . i18n_r('mapCreator/LANG_Create_Map') . '" name="createmap">
-
-		</form>';
-
-	$html .= '
-		<script src="' . $SITEURL . 'admin/template/js/ckeditor/ckeditor.js"></script>';
-	$html .= "<script>CKEDITOR.replace(popupcontent, {
-				filebrowserBrowseUrl: 'filebrowser.php?type=all',
-				filebrowserImageBrowseUrl: 'filebrowser.php?type=images',
-				filebrowserWindowWidth: '730',
-				filebrowserWindowHeight: '500'
-				, toolbar: 'advanced'
-			});
-		</script>";
-
-	echo $html;
-
-	echo "
-		<script>
-			let countPoint = 1;
-			const addBtn = document.querySelector('.addnewpoint');
-
-			addBtn.addEventListener('click',e=>{
-				e.preventDefault();
-
-				document.querySelector('.nextpoint').insertAdjacentHTML('afterbegin',`
-
-					<div style='position:relative; width:100%; height:auto; padding:10px; border:solid 1px #ddd; margin:10px 0; box-sizing:border-box; padding-top:30px;'>
-
-						<button class='closeitem' style='position:absolute; right:0;top:0; background:#D61C4E; color:#fff; padding:6px; border:none;' onclick='event.preventDefault();this.parentNode.remove()'>" . i18n_r('mapCreator/LANG_Close') . "</button>
-
-						<i class='uil uil-map-marker' style='padding-right:10px;'></i><input type='text' name='localizationpoint[]'  required placeholder='" . i18n_r('mapCreator/LANG_Marker_Coordinates') . "' style='margin-top:10px; padding:5px; width:95%; box-sizing:border-box; margin-bottom:10px;'>
-						<br>
-
-						<i class='uil uil-chat' style='padding-right:10px;'></i><input type='checkbox' name='showpopup[]' style='margin-top:10px; margin-bottom:10px;'> " . i18n_r('mapCreator/LANG_Show_Popup') . "
-
-						<textarea name='popupcontent[]' id='popupcontent`+countPoint+`'></textarea>
-				`)
-
-				CKEDITOR.replace('popupcontent'+countPoint, {
-					filebrowserBrowseUrl: 'filebrowser.php?type=all',
-					filebrowserImageBrowseUrl: 'filebrowser.php?type=images',
-					filebrowserWindowWidth: '730',
-					filebrowserWindowHeight: '500'
-					, toolbar: 'advanced'
-				});
-
-				countPoint++;
-			});
-		</script>";
-
-	#listmap
-
-	$path = GSDATAOTHERPATH . '/mapCreator/*.txt';
-
-	$filenames = glob($path);
-
-	foreach ($filenames as $filename) {
-		echo '
-			<form method="post" style="background:#fafafa; border:solid 1px #ddd; box-sizing:border-box; padding:10px; margin-top:20px;">';
-
-		$base = basename($filename);
-
-		$nename = substr($base, 0, -4);
-
-		echo  '<h3 style="margin-top:10px;">' . $nename . '</h3>   ';
-
-		echo '<p>' . i18n_r('mapCreator/LANG_Add') . ' <span style="color:blue;"> &#60;?php getMapCreator("' . $nename . '") ;?&#62; </span> ' . i18n_r('mapCreator/LANG_In_Template') . ' <span style="color:green">[% mapcreator=' . $nename . ' %] </span> ' . i18n_r('mapCreator/LANG_In_Editor') . '.</p>';
-
-		echo '<input type="text" name="dir" value="' . $filename . '" style="display:none">
-				<textarea name="editcontent" style="width:100%; height:250px; background:#003865; color:#fff; box-sizing:border-box; padding:5px;">';
-
-		echo file_get_contents($filename);
-
-		echo '</textarea>
-				<div style="height:300px; overflow:hidden; margin-top:10px; border:solid 2px #ddd;">';
-
-		echo file_get_contents($filename);
-
-		echo '
-				</div>
-				<input type="submit" name="SaveEdit" value="' . i18n_r('mapCreator/LANG_Save_Edited') . '" style="margin-top:10px; margin-right:10px; background:#003865; padding:10px 15px; color:#fff; border:none; cursor: pointer;">
-		 
-				<input type="submit" name="deletemap" onclick="return confirm(`' . i18n_r('mapCreator/LANG_Are_You_Sure') . '`)"  value="Delete Map" style="cursor:pointer; background:#D61C4E; padding:10px 15px; color:#fff; border:none; pointer:cursor; margin-bottom:5px;">
-	  
-			</form>';
-
-		if (isset($_POST['SaveEdit'])) {
-			file_put_contents($_POST['dir'], $_POST['editcontent']);
-			echo ("<meta http-equiv='refresh' content='0'>");
-		};
-
-		if (isset($_POST['deletemap'])) {
-			unlink($_POST['dir']);
-			echo ("<meta http-equiv='refresh' content='0'>");
-		};
+	$folder = GSDATAOTHERPATH . '/mapCreator/';
+	if (!file_exists($folder)) {
+		mkdir($folder, 0755, true);
 	}
-	#endlistmap
 
-	if (isset($_POST['createmap'])) {
-		global $SITEURL;
+	# Save/Update handler
+	if (isset($_POST['save_map'])) {
+		$mapName = preg_replace('/[^a-zA-Z0-9_]/', '', lcfirst(ucwords($_POST['namemap'])));
+		$heightChoice = $_POST['height_preset'];
+		$aspectRatio = 'none';
+		$finalHeight = '400px';
 
-		$nameFromPost = $_POST['namemap'];
-
-
-		function toCamelCase($string)
-		{
-			$string = strtolower($string);
-			$string = ucwords($string);
-			$string = str_replace(' ', '', $string);
-			$string = lcfirst($string);
-			return $string;
-		};
-
-		$namemap = toCamelCase($nameFromPost);
-
-		$localization = $_POST['localization'];
-		$zoom = $_POST['zoom'];
-
-		$localizationPoint = $_POST['localizationpoint'];
-		$showpopup = $_POST['showpopup'];
-		$popupcontent = $_POST['popupcontent'];
-		$height = $_POST['height'];
-		$mousescroll = $_POST['mousescroll'];
-
-		// Set up the data
-		$data = "
-			<style>#" . $namemap . "{height:" . $height . ";}</style>
-			<div id='" . $namemap . "'></div>
-			
-			<script src='" . $SITEURL . "plugins/mapCreator/js/leaflet.js'></script>
-			<script>
-				let $namemap = L.map('" . $namemap . "', {
-					center: [" . $localization . "],
-					zoom:" . $zoom . ",
-					scrollWheelZoom:" . $mousescroll . ",
-				});
-				";
-
-		foreach ($localizationPoint as $key => $n) {
-			if ($showpopup[$key] == "on") {
-				$data .= "L.marker([" . $n . "]).addTo(" . $namemap . ").bindPopup(`" . $popupcontent[$key] . "`,{autoClose:false}).openPopup();";
-			} else {
-				$data .= "L.marker([" . $n . "]).addTo(" . $namemap . ");";
-			};
-		};
-
-		$data .= "	L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-					attribution: '© OpenStreetMap',
-				}).addTo(" . $namemap . ");
-			</script>";
-
-		$folder        = GSDATAOTHERPATH . '/mapCreator/';
-		$filename      = $folder . $namemap . '.txt';
-		$chmod_mode    = 0755;
-		$folder_exists = file_exists($folder) || mkdir($folder, $chmod_mode);
-
-		// Save the file (assuming that the folder indeed exists)
-		if ($folder_exists) {
-			file_put_contents($filename, $data);
+		if (strpos($heightChoice, 'ratio:') === 0) {
+			$aspectRatio = str_replace('ratio:', '', $heightChoice);
+		} else {
+			$numeric = is_numeric($_POST['height_val']) ? $_POST['height_val'] : '400';
+			$finalHeight = $numeric . $heightChoice;
 		}
 
-		echo ("<meta http-equiv='refresh' content='0'>");
+		$points = array();
+		if (isset($_POST['point_uids']) && is_array($_POST['point_uids'])) {
+			foreach ($_POST['point_uids'] as $uid) {
+				if (!isset($_POST['point_coords'][$uid])) continue;
+				$coord = $_POST['point_coords'][$uid];
+				$cleaned = preg_replace('/[^0-9.,\- ]/', '', $coord);
+				if (empty($cleaned)) continue;
+
+				$showPopup = isset($_POST['point_showpopup'][$uid]) && $_POST['point_showpopup'][$uid] === '1';
+
+				$points[] = array(
+					'coords' => $cleaned,
+					'color' => isset($_POST['point_color'][$uid]) ? $_POST['point_color'][$uid] : '#2A81CB',
+					'showPopup' => $showPopup,
+					'popup' => isset($_POST['point_popup'][$uid]) ? $_POST['point_popup'][$uid] : ''
+				);
+			}
+		}
+
+		$mapPayload = array(
+			'name' => $mapName,
+			'center' => preg_replace('/[^0-9.,\- ]/', '', $_POST['localization']),
+			'zoom' => intval($_POST['zoom']),
+			'height' => $finalHeight,
+			'aspectRatio' => $aspectRatio,
+			'mousescroll' => ($_POST['mousescroll'] === 'true') ? 'true' : 'false',
+			'clustering' => ($_POST['clustering'] === 'true') ? 'true' : 'false',
+			'points' => $points
+		);
+
+		if (file_exists($folder . $mapName . '.txt')) {
+			unlink($folder . $mapName . '.txt');
+		}
+
+		file_put_contents($folder . $mapName . '.json', json_encode($mapPayload, JSON_PRETTY_PRINT));
+		echo "<meta http-equiv='refresh' content='0'>";
+		exit;
+	}
+
+	# Delete Map
+	if (isset($_POST['deletemap'])) {
+		$target = $_POST['map_file'];
+		if (file_exists($target)) {
+			unlink($target);
+		}
+		echo "<meta http-equiv='refresh' content='0'>";
+		exit;
+	}
+
+	# Edit selection
+	$editingMap = null;
+	$editingData = null;
+	if (isset($_GET['edit'])) {
+		$editingMap = basename($_GET['edit']);
+		$jsonPath = $folder . $editingMap . '.json';
+		$txtPath = $folder . $editingMap . '.txt';
+
+		if (file_exists($jsonPath)) {
+			$editingData = json_decode(file_get_contents($jsonPath), true);
+		} elseif (file_exists($txtPath)) {
+			$editingData = parseLegacyMapTxt(file_get_contents($txtPath));
+			$editingData['name'] = $editingMap;
+		}
+	}
+
+	echo '<link rel="stylesheet" href="https://unicons.iconscout.com/release/v4.0.0/css/line.css">
+	<style>
+		.mc-container { background: #fafafa; border: 1px solid #ddd; padding: 15px; margin-bottom: 20px; box-sizing: border-box; }
+		.mc-input { padding: 6px; width: 100%; box-sizing: border-box; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 3px; }
+		.mc-row { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; }
+		.mc-card { position: relative; background: #fff; padding: 12px; border: 1px solid #e0e0e0; margin-top: 10px; }
+		.mc-badge { background: #003865; color: #fff; padding: 2px 6px; border-radius: 3px; font-size: 11px; }
+	</style>';
+
+	echo '<h3>' . ($editingData ? i18n_r('mapCreator/LANG_Edit_Map') . ': ' . htmlspecialchars($editingMap) : i18n_r('mapCreator/LANG_Create_Map')) . ' 📍</h3>';
+	?>
+
+	<!-- Visual Coordinate Picker -->
+	<div class="mc-container">
+		<h4 style="margin: 0 0 8px 0;"><?php echo i18n_r('mapCreator/LANG_Visual_Picker_Title'); ?></h4>
+		<p style="font-size:12px; margin: 0 0 10px 0; color:#555;"><?php echo i18n_r('mapCreator/LANG_Visual_Picker_Desc'); ?></p>
+		<div id="visualPickerMap" style="width:100%; height:260px; border:1px solid #ccc;"></div>
+		<div style="margin-top: 8px; display:flex; gap:10px; align-items:center;">
+			<span id="pickerCoordsLabel" style="font-size: 13px; font-weight: bold; color: #D61C4E;"><?php echo i18n_r('mapCreator/LANG_Picker_Click_Map'); ?></span>
+			<button type="button" id="btnUseCenter" style="padding: 5px 10px; cursor:pointer;"><?php echo i18n_r('mapCreator/LANG_Use_As_Center'); ?></button>
+			<button type="button" id="btnDropPoint" style="padding: 5px 10px; cursor:pointer;"><?php echo i18n_r('mapCreator/LANG_Add_As_Point'); ?></button>
+		</div>
+	</div>
+
+	<!-- Map Configuration Form -->
+	<form method="POST" action="load.php?id=mapCreator" class="mc-container">
+		<input type="hidden" name="save_map" value="1">
+		
+		<label><b><?php echo i18n_r('mapCreator/LANG_Map_Name'); ?></b></label>
+		<input type="text" name="namemap" required value="<?php echo htmlspecialchars($editingData ? $editingData['name'] : ''); ?>" class="mc-input" <?php echo $editingData ? 'readonly' : ''; ?>>
+
+		<div class="mc-row">
+			<div style="flex: 2;">
+				<label><b><?php echo i18n_r('mapCreator/LANG_Map_Center'); ?></b></label>
+				<input type="text" id="mapCenterInput" name="localization" required value="<?php echo htmlspecialchars($editingData ? $editingData['center'] : '51.505, -0.09'); ?>" class="mc-input">
+			</div>
+			<div style="flex: 1;">
+				<label><b><?php echo i18n_r('mapCreator/LANG_Map_Zoom'); ?></b></label>
+				<input type="number" id="mapZoomInput" name="zoom" min="1" max="19" required value="<?php echo htmlspecialchars($editingData ? $editingData['zoom'] : 13); ?>" class="mc-input">
+			</div>
+		</div>
+
+		<div class="mc-row">
+			<div style="flex: 1;">
+				<label><b><?php echo i18n_r('mapCreator/LANG_Height_Preset'); ?></b></label>
+				<select name="height_preset" id="height_preset" class="mc-input" onchange="toggleHeightInput(this.value)">
+					<?php 
+						$aspect = isset($editingData['aspectRatio']) ? $editingData['aspectRatio'] : 'none';
+						$currHeight = isset($editingData['height']) ? $editingData['height'] : '400px';
+						$currUnit = preg_replace('/[0-9]/', '', $currHeight) ?: 'px';
+					?>
+					<option value="px" <?php echo ($aspect === 'none' && $currUnit === 'px') ? 'selected' : ''; ?>><?php echo i18n_r('mapCreator/LANG_Fixed_Pixels'); ?></option>
+					<option value="vh" <?php echo ($aspect === 'none' && $currUnit === 'vh') ? 'selected' : ''; ?>><?php echo i18n_r('mapCreator/LANG_Viewport_Height'); ?></option>
+					<option value="%" <?php echo ($aspect === 'none' && $currUnit === '%') ? 'selected' : ''; ?>><?php echo i18n_r('mapCreator/LANG_Percentage'); ?></option>
+					<option value="ratio:16:9" <?php echo ($aspect === '16:9') ? 'selected' : ''; ?>><?php echo i18n_r('mapCreator/LANG_Ratio_16_9'); ?></option>
+					<option value="ratio:4:3" <?php echo ($aspect === '4:3') ? 'selected' : ''; ?>><?php echo i18n_r('mapCreator/LANG_Ratio_4_3'); ?></option>
+					<option value="ratio:1:1" <?php echo ($aspect === '1:1') ? 'selected' : ''; ?>><?php echo i18n_r('mapCreator/LANG_Ratio_1_1'); ?></option>
+				</select>
+			</div>
+			<div style="flex: 1;" id="heightValContainer">
+				<label><b><?php echo i18n_r('mapCreator/LANG_Height_Magnitude'); ?></b></label>
+				<input type="number" name="height_val" id="height_val" value="<?php echo preg_replace('/[^0-9]/', '', $currHeight) ?: '400'; ?>" class="mc-input">
+			</div>
+			<div style="flex: 1;">
+				<label><b><?php echo i18n_r('mapCreator/LANG_Mouse_Scroll'); ?></b></label>
+				<select name="mousescroll" class="mc-input">
+					<option value="true" <?php echo (isset($editingData['mousescroll']) && $editingData['mousescroll'] === 'true') ? 'selected' : ''; ?>><?php echo i18n_r('mapCreator/LANG_Enabled'); ?></option>
+					<option value="false" <?php echo (!isset($editingData['mousescroll']) || $editingData['mousescroll'] === 'false') ? 'selected' : ''; ?>><?php echo i18n_r('mapCreator/LANG_Disabled'); ?></option>
+				</select>
+			</div>
+			<div style="flex: 1;">
+				<label><b><?php echo i18n_r('mapCreator/LANG_Clustering'); ?></b></label>
+				<select name="clustering" class="mc-input">
+					<option value="true" <?php echo (!isset($editingData['clustering']) || $editingData['clustering'] === 'true') ? 'selected' : ''; ?>><?php echo i18n_r('mapCreator/LANG_Enabled'); ?></option>
+					<option value="false" <?php echo (isset($editingData['clustering']) && $editingData['clustering'] === 'false') ? 'selected' : ''; ?>><?php echo i18n_r('mapCreator/LANG_Disabled'); ?></option>
+				</select>
+			</div>
+		</div>
+
+		<hr style="border:0; border-top:1px solid #e0e0e0; margin:15px 0;">
+
+		<div style="display:flex; justify-content:space-between; align-items:center;">
+			<b><?php echo i18n_r('mapCreator/LANG_Map_Points'); ?></b>
+			<button type="button" class="addnewpoint" style="background:#D61C4E; color:#fff; border:none; padding:6px 12px; cursor:pointer;">
+				<i class="uil uil-plus-square"></i> <?php echo i18n_r('mapCreator/LANG_Add_Point'); ?>
+			</button>
+		</div>
+
+		<div class="nextpoint" id="pointsContainer"></div>
+
+		<div style="margin-top: 20px;">
+			<input type="submit" style="background:#000; color:#fff; padding:10px 18px; border:none; cursor:pointer;" value="<?php echo $editingData ? i18n_r('mapCreator/LANG_Update_Map') : i18n_r('mapCreator/LANG_Create_Map'); ?>">
+			<?php if ($editingData): ?>
+				<a href="load.php?id=mapCreator" style="margin-left: 10px; color:#555; text-decoration:none;"><?php echo i18n_r('mapCreator/LANG_Cancel_Edit'); ?></a>
+			<?php endif; ?>
+		</div>
+	</form>
+
+	<script src="<?php echo $SITEURL; ?>admin/template/js/ckeditor/ckeditor.js"></script>
+	<script>
+		let activeCoords = null;
+
+		function toggleHeightInput(val) {
+			document.getElementById('heightValContainer').style.display = val.startsWith('ratio:') ? 'none' : 'block';
+		}
+		toggleHeightInput(document.getElementById('height_preset').value);
+
+		// Admin Visual Picker initialization
+		document.addEventListener('DOMContentLoaded', function() {
+			const initialCenter = [51.505, -0.09];
+			const pickerMap = L.map('visualPickerMap').setView(initialCenter, 5);
+			L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(pickerMap);
+
+			let clickMarker = null;
+			pickerMap.on('click', function(e) {
+				const lat = e.latlng.lat.toFixed(5);
+				const lng = e.latlng.lng.toFixed(5);
+				activeCoords = lat + ', ' + lng;
+				document.getElementById('pickerCoordsLabel').innerText = '<?php echo addslashes(i18n_r('mapCreator/LANG_Picker_Selected')); ?>: ' + activeCoords;
+
+				if (clickMarker) {
+					clickMarker.setLatLng(e.latlng);
+				} else {
+					clickMarker = L.marker(e.latlng).addTo(pickerMap);
+				}
+			});
+
+			document.getElementById('btnUseCenter').addEventListener('click', function() {
+				if (activeCoords) {
+					document.getElementById('mapCenterInput').value = activeCoords;
+					document.getElementById('mapZoomInput').value = pickerMap.getZoom();
+				}
+			});
+
+			document.getElementById('btnDropPoint').addEventListener('click', function() {
+				if (activeCoords) {
+					appendPointRow({ coords: activeCoords, color: '#2A81CB', showPopup: true, popup: '' });
+				}
+			});
+
+			const preloadedPoints = <?php echo json_encode(isset($editingData['points']) ? $editingData['points'] : array()); ?>;
+			if (preloadedPoints.length > 0) {
+				preloadedPoints.forEach(pt => appendPointRow(pt));
+			}
+		});
+
+		function appendPointRow(data = {}) {
+			const uid = 'pt_' + Math.random().toString(36).substr(2, 9);
+			const coords = data.coords || '';
+			const color = data.color || '#2A81CB';
+			const showPopup = (data.showPopup === true || data.showPopup === 'true' || data.showPopup === 1 || data.showPopup === '1') ? 'checked' : '';
+			const popup = data.popup || '';
+
+			const colors = [
+				{ name: '<?php echo addslashes(i18n_r('mapCreator/LANG_Color_Default_Blue')); ?>', val: '#2A81CB' },
+				{ name: '<?php echo addslashes(i18n_r('mapCreator/LANG_Color_Crimson_Red')); ?>', val: '#D61C4E' },
+				{ name: '<?php echo addslashes(i18n_r('mapCreator/LANG_Color_Forest_Green')); ?>', val: '#2E7D32' },
+				{ name: '<?php echo addslashes(i18n_r('mapCreator/LANG_Color_Vibrant_Orange')); ?>', val: '#EF6C00' },
+				{ name: '<?php echo addslashes(i18n_r('mapCreator/LANG_Color_Royal_Violet')); ?>', val: '#6A1B9A' },
+				{ name: '<?php echo addslashes(i18n_r('mapCreator/LANG_Color_Dark_Slate')); ?>', val: '#37474F' }
+			];
+
+			let colorOptions = '';
+			colors.forEach(c => {
+				colorOptions += `<option value="${c.val}" ${c.val === color ? 'selected' : ''}>${c.name}</option>`;
+			});
+
+			const rowHtml = `
+				<div class='mc-card' id='point_box_${uid}'>
+					<input type='hidden' name='point_uids[]' value='${uid}'>
+					<button class='closeitem' style='position:absolute; right:10px; top:10px; background:#D61C4E; color:#fff; border:none; padding:4px 8px; cursor:pointer;' onclick='event.preventDefault(); document.getElementById("point_box_${uid}").remove();'>&times;</button>
+					<div class='mc-row'>
+						<div style='flex:2;'>
+							<label><?php echo addslashes(i18n_r('mapCreator/LANG_Marker_Coordinates')); ?>:</label>
+							<input type='text' name='point_coords[${uid}]' value='${coords}' required class='mc-input' style='margin-bottom:0;'>
+						</div>
+						<div style='flex:1;'>
+							<label><?php echo addslashes(i18n_r('mapCreator/LANG_Pin_Color')); ?>:</label>
+							<select name='point_color[${uid}]' class='mc-input' style='margin-bottom:0;'>
+								${colorOptions}
+							</select>
+						</div>
+					</div>
+					<div style='margin: 8px 0;'>
+						<label><input type='checkbox' name='point_showpopup[${uid}]' value='1' ${showPopup}> <b><?php echo addslashes(i18n_r('mapCreator/LANG_Show_Popup_Default')); ?></b> <?php echo addslashes(i18n_r('mapCreator/LANG_Popup_Hint')); ?></label>
+					</div>
+					<label><?php echo addslashes(i18n_r('mapCreator/LANG_Popup_Content')); ?>:</label>
+					<textarea name='point_popup[${uid}]' id='popup_editor_${uid}'>${popup}</textarea>
+				</div>`;
+
+			document.getElementById('pointsContainer').insertAdjacentHTML('beforeend', rowHtml);
+
+			CKEDITOR.replace('popup_editor_' + uid, {
+				filebrowserBrowseUrl: 'filebrowser.php?type=all',
+				filebrowserImageBrowseUrl: 'filebrowser.php?type=images',
+				toolbar: 'basic',
+				height: 100
+			});
+		}
+
+		document.querySelector('.addnewpoint').addEventListener('click', e => {
+			e.preventDefault();
+			appendPointRow();
+		});
+	</script>
+
+	<!-- Saved Maps List & Live Preview -->
+	<h3 style="margin-top: 30px;"><?php echo i18n_r('mapCreator/LANG_Saved_Maps'); ?></h3>
+	<?php
+	$files = array_merge(glob($folder . '*.json'), glob($folder . '*.txt'));
+	$processed = array();
+
+	if (!empty($files)) {
+		foreach ($files as $filepath) {
+			$filename = pathinfo($filepath, PATHINFO_FILENAME);
+			if (in_array($filename, $processed)) continue;
+			$processed[] = $filename;
+
+			$isJson = file_exists($folder . $filename . '.json');
+			if ($isJson) {
+				$mdata = json_decode(file_get_contents($folder . $filename . '.json'), true);
+			} else {
+				$mdata = parseLegacyMapTxt(file_get_contents($folder . $filename . '.txt'));
+				$mdata['name'] = $filename;
+			}
+
+			echo "<div class='mc-container'>";
+			echo "<div style='display:flex; justify-content:space-between; align-items:center;'>";
+			echo "<h3 style='margin:0;'>" . htmlspecialchars($filename) . " " . ($isJson ? "<span class='mc-badge'>JSON</span>" : "<span class='mc-badge' style='background:#f57c00;'>Legacy TXT</span>") . "</h3>";
+			echo "<div>";
+			echo "<a href='load.php?id=mapCreator&edit=" . urlencode($filename) . "' style='background:#003865; color:#fff; padding:6px 10px; text-decoration:none; margin-right:5px;'>" . i18n_r('mapCreator/LANG_Edit') . "</a>";
+			echo "<form method='POST' action='load.php?id=mapCreator' style='display:inline;' onsubmit='return confirm(\"" . addslashes(i18n_r('mapCreator/LANG_Are_You_Sure')) . "\");'>";
+			echo "<input type='hidden' name='map_file' value='" . htmlspecialchars($filepath) . "'>";
+			echo "<input type='submit' name='deletemap' value='" . i18n_r('mapCreator/LANG_Delete_Map') . "' style='background:#D61C4E; color:#fff; border:none; padding:6px 10px; cursor:pointer;'>";
+			echo "</form>";
+			echo "</div>";
+			echo "</div>";
+
+			echo "<p style='margin: 8px 0;'>" . i18n_r('mapCreator/LANG_Add') . " <code style='color:blue;'>&lt;?php getMapCreator('" . $filename . "'); ?&gt;</code> " . i18n_r('mapCreator/LANG_In_Template') . " <code style='color:green'>[% mapcreator=" . $filename . " %]</code> " . i18n_r('mapCreator/LANG_In_Editor') . ".</p>";
+
+			echo "<div style='border:1px solid #ccc; margin-top:10px; overflow:hidden;'>";
+			echo renderMapHtmlAndScript("preview_" . $filename, $mdata);
+			echo "</div>";
+			echo "</div>";
+		}
+	} else {
+		echo "<p>" . i18n_r('mapCreator/LANG_No_Maps') . "</p>";
 	}
 
 	echo '
@@ -259,29 +534,32 @@ add_action('theme-header', 'pageBeginMapCreator');
 function pageBeginMapCreator()
 {
 	global $content;
-	$newcontent = preg_replace_callback(
-		'/\\[% mapcreator=(.*) %\\]/i',
-		'getMapCreatorShortcode',
-		$content
-	);
-	$content = $newcontent;
-};
+	$content = preg_replace_callback('/\[% mapcreator=([a-zA-Z0-9_\-]+) %\]/i', 'getMapCreatorShortcode', $content);
+}
 
 function getMapCreator($name)
 {
-	global $SITEURL;
-	$file = GSDATAOTHERPATH . '/mapCreator/' . $name . '.txt';
-	if (file_exists($file)) {
-		echo file_get_contents($file);
-	}
-};
+	echo renderMapById($name);
+}
 
 function getMapCreatorShortcode($matches)
 {
-	$name =  $matches[1];
-	global $SITEURL;
-	$file = GSDATAOTHERPATH . '/mapCreator/' . $name . '.txt';
-	if (file_exists($file)) {
-		return file_get_contents($file);
+	return renderMapById($matches[1]);
+}
+
+function renderMapById($rawName)
+{
+	$name = basename($rawName);
+	$folder = GSDATAOTHERPATH . '/mapCreator/';
+	$jsonFile = $folder . $name . '.json';
+	$txtFile = $folder . $name . '.txt';
+
+	if (file_exists($jsonFile)) {
+		$data = json_decode(file_get_contents($jsonFile), true);
+		return renderMapHtmlAndScript("map_" . $name, $data);
+	} elseif (file_exists($txtFile)) {
+		$legacyData = parseLegacyMapTxt(file_get_contents($txtFile));
+		return renderMapHtmlAndScript("map_" . $name, $legacyData);
 	}
-};
+	return '';
+}
