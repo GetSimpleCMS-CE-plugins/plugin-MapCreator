@@ -10,7 +10,7 @@ i18n_merge('mapCreator') || i18n_merge('mapCreator', 'en_US');
 register_plugin(
 	$thisfile,
 	'MapCreator',
-	'6.0',
+	'6.1',
 	'Multicolor',
 	'https://discord.gg/vkySHPxpg2',
 	i18n_r('mapCreator/LANG_Description'),
@@ -280,6 +280,31 @@ function mapCreator()
 		.mc-row { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; }
 		.mc-card { position: relative; background: #fff; padding: 12px; border: 1px solid #e0e0e0; margin-top: 10px; }
 		.mc-badge { background: #003865; color: #fff; padding: 2px 6px; border-radius: 3px; font-size: 11px; }
+
+		/* Autocomplete Dropdown Styles */
+		.mc-autocomplete-wrapper { position: relative; flex: 1; }
+		.mc-autocomplete-list { 
+			position: absolute; 
+			top: 100%; 
+			left: 0; 
+			right: 0; 
+			background: #fff; 
+			border: 1px solid #ccc; 
+			border-top: none; 
+			z-index: 1000; 
+			max-height: 200px; 
+			overflow-y: auto; 
+			display: none; 
+			box-shadow: 0 4px 8px rgba(0,0,0,0.15); 
+		}
+		.mc-autocomplete-item { 
+			padding: 8px 10px; 
+			font-size: 12px; 
+			cursor: pointer; 
+			border-bottom: 1px solid #f0f0f0; 
+			line-height: 1.4;
+		}
+		.mc-autocomplete-item:hover, .mc-autocomplete-item.active { background: #003865; color: #fff; }
 	</style>';
 
 	echo '<h3>' . ($editingData ? i18n_r('mapCreator/LANG_Edit_Map') . ': ' . htmlspecialchars($editingMap) : i18n_r('mapCreator/LANG_Create_Map')) . ' 📍</h3>';
@@ -289,11 +314,31 @@ function mapCreator()
 	<div class="mc-container">
 		<h4 style="margin: 0 0 8px 0;"><?php echo i18n_r('mapCreator/LANG_Visual_Picker_Title'); ?></h4>
 		<p style="font-size:12px; margin: 0 0 10px 0; color:#555;"><?php echo i18n_r('mapCreator/LANG_Visual_Picker_Desc'); ?></p>
+		
+		<!-- Address Geocoding Search Bar with Country Code Prioritization & Autocomplete -->
+		<div style="display:flex; gap:6px; margin-bottom:6px; align-items:center;">
+			<div class="mc-autocomplete-wrapper">
+				<input type="text" id="pickerSearchInput" placeholder="<?php echo addslashes(i18n_r('mapCreator/LANG_Search_Address_Placeholder')); ?>" class="mc-input" style="margin-bottom:0;" autocomplete="off">
+				<div id="pickerAutocompleteList" class="mc-autocomplete-list"></div>
+			</div>
+			<button type="button" id="btnPickerSearch" style="padding: 6px 14px; cursor:pointer; background:#003865; color:#fff; border:none; border-radius:3px;">
+				<i class="uil uil-search"></i> <?php echo i18n_r('mapCreator/LANG_Search_Btn'); ?>
+			</button>
+		</div>
+
+		<div style="margin-bottom:10px; display:flex; align-items:center; gap:8px;">
+			<label style="font-size:11px; color:#555;"><?php echo i18n_r('mapCreator/LANG_Search_Country_Filter'); ?></label>
+			<input type="text" id="pickerCountryCode" placeholder="es" maxlength="10" style="padding:4px 6px; width:70px; font-size:11px; border:1px solid #ccc; border-radius:3px; text-transform:lowercase;">
+		</div>
+
 		<div id="visualPickerMap" style="width:100%; height:260px; border:1px solid #ccc;"></div>
-		<div style="margin-top: 8px; display:flex; gap:10px; align-items:center;">
+		<div style="margin-top: 8px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
 			<span id="pickerCoordsLabel" style="font-size: 13px; font-weight: bold; color: #D61C4E;"><?php echo i18n_r('mapCreator/LANG_Picker_Click_Map'); ?></span>
 			<button type="button" id="btnUseCenter" style="padding: 5px 10px; cursor:pointer;"><?php echo i18n_r('mapCreator/LANG_Use_As_Center'); ?></button>
 			<button type="button" id="btnDropPoint" style="padding: 5px 10px; cursor:pointer;"><?php echo i18n_r('mapCreator/LANG_Add_As_Point'); ?></button>
+			<button type="button" id="btnLocateGps" style="padding: 5px 10px; cursor:pointer; background:#003865; color:#fff; border:none; border-radius:3px;">
+				<i class="uil uil-location-pin-alt"></i> <?php echo i18n_r('mapCreator/LANG_Locate_Me'); ?>
+			</button>
 		</div>
 	</div>
 
@@ -358,15 +403,27 @@ function mapCreator()
 
 		<div style="display:flex; justify-content:space-between; align-items:center;">
 			<b><?php echo i18n_r('mapCreator/LANG_Map_Points'); ?></b>
-			<button type="button" class="addnewpoint" style="background:#D61C4E; color:#fff; border:none; padding:6px 12px; cursor:pointer;">
-				<i class="uil uil-plus-square"></i> <?php echo i18n_r('mapCreator/LANG_Add_Point'); ?>
+			<button type="button" class="addnewpoint" style="background:#FFAD33; color:#fff; border:none; padding:6px 12px; cursor:pointer; border-radius:4px;">
+				<svg xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle" width="1.2em" height="1.2em" viewBox="0 0 24 24"><path d="M0 0h24v24H0z" fill="none"/><path fill="currentColor" d="M9 11.5A2.5 2.5 0 0 0 11.5 9A2.5 2.5 0 0 0 9 6.5A2.5 2.5 0 0 0 6.5 9A2.5 2.5 0 0 0 9 11.5M9 2c3.86 0 7 3.13 7 7c0 5.25-7 13-7 13S2 14.25 2 9a7 7 0 0 1 7-7m6 15h3v-3h2v3h3v2h-3v3h-2v-3h-3z"/></svg> <?php echo i18n_r('mapCreator/LANG_Add_Point'); ?>
 			</button>
 		</div>
 
 		<div class="nextpoint" id="pointsContainer"></div>
 
 		<div style="margin-top: 20px;">
-			<input type="submit" style="background:#000; color:#fff; padding:10px 18px; border:none; cursor:pointer;" value="<?php echo $editingData ? i18n_r('mapCreator/LANG_Update_Map') : i18n_r('mapCreator/LANG_Create_Map'); ?>">
+			<button type="submit" style="background:#4CAF50; color:#fff; padding:10px 18px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:8px; border-radius:4px; font-weight:600;">
+				<?php if ($editingData): ?>
+					<!-- Update icon: pencil -->
+					<svg xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle" width="1.5em" height="1.5em" viewBox="0 0 24 24"><path d="M0 0h24v24H0z" fill="none"/><path fill="currentColor" d="M7.5 2.717L2 5.926V21.5l5.5-2.267zm2 16.193l1 .59v-.955l4-4V5.09l-5-2.953zM22 2.5v8.97l-2.213-2.212l-3.287 3.287V4.767zm1.914 13.714l-4.127-4.128l-7.287 7.287l.001 4.127h4.127zm-6.463 1.036l1.299 1.3l-2.95 2.95h-1.3v-1.3z"/></svg>
+				<?php else: ?>
+					<!-- Update icon: add -->
+					<svg xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle" width="1.5em" height="1.5em" viewBox="0 0 24 24"><path d="M0 0h24v24H0z" fill="none"/><path fill="currentColor" d="M7.5 2.717L2 5.926V21.5l5.5-2.267zm2 16.193l3.245 1.916A6.47 6.47 0 0 1 11.5 17a6.5 6.5 0 0 1 3-5.478V5.09l-5-2.953zM22 2.5v9.376a6.52 6.52 0 0 0-5.5-1.202V4.767z"/><path fill="currentColor" d="M19 16v-4h-2v4h-4v2h4v4h2v-4h4v-2z"/></svg>
+				<?php endif; ?>
+
+				<?php echo $editingData
+					? i18n_r('mapCreator/LANG_Update_Map')
+					: i18n_r('mapCreator/LANG_Create_Map'); ?>
+			</button>
 			<?php if ($editingData): ?>
 				<a href="load.php?id=mapCreator" style="margin-left: 10px; color:#555; text-decoration:none;"><?php echo i18n_r('mapCreator/LANG_Cancel_Edit'); ?></a>
 			<?php endif; ?>
@@ -385,21 +442,162 @@ function mapCreator()
 		// Admin Visual Picker initialization
 		document.addEventListener('DOMContentLoaded', function() {
 			const initialCenter = [51.505, -0.09];
+
 			const pickerMap = L.map('visualPickerMap').setView(initialCenter, 5);
 			L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(pickerMap);
 
 			let clickMarker = null;
-			pickerMap.on('click', function(e) {
-				const lat = e.latlng.lat.toFixed(5);
-				const lng = e.latlng.lng.toFixed(5);
+
+			function updatePickerCoords(latlng) {
+				const lat = latlng.lat.toFixed(5);
+				const lng = latlng.lng.toFixed(5);
 				activeCoords = lat + ', ' + lng;
 				document.getElementById('pickerCoordsLabel').innerText = '<?php echo addslashes(i18n_r('mapCreator/LANG_Picker_Selected')); ?>: ' + activeCoords;
+			}
 
+			function setOrMoveMarker(latlng) {
+				updatePickerCoords(latlng);
 				if (clickMarker) {
-					clickMarker.setLatLng(e.latlng);
+					clickMarker.setLatLng(latlng);
 				} else {
-					clickMarker = L.marker(e.latlng).addTo(pickerMap);
+					clickMarker = L.marker(latlng, { draggable: true }).addTo(pickerMap);
+					clickMarker.on('dragend', function(e) {
+						updatePickerCoords(e.target.getLatLng());
+					});
 				}
+			}
+
+			// Single-click placement
+			pickerMap.on('click', function(e) {
+				setOrMoveMarker(e.latlng);
+			});
+
+			// Autocomplete & Search Logic with Regional Prioritization
+			const searchInput = document.getElementById('pickerSearchInput');
+			const countryCodeInput = document.getElementById('pickerCountryCode');
+			const autocompleteList = document.getElementById('pickerAutocompleteList');
+			let debounceTimer = null;
+			let currentResults = [];
+
+			function closeAutocomplete() {
+				autocompleteList.style.display = 'none';
+				autocompleteList.innerHTML = '';
+			}
+
+			function selectResult(item) {
+				const lat = parseFloat(item.lat);
+				const lng = parseFloat(item.lon);
+				const latlng = L.latLng(lat, lng);
+				pickerMap.setView(latlng, 15);
+				setOrMoveMarker(latlng);
+				searchInput.value = item.display_name;
+				closeAutocomplete();
+			}
+
+			function buildNominatimUrl(query) {
+				let url = 'https://nominatim.openstreetmap.org/search?format=json&limit=5&q=' + encodeURIComponent(query);
+				
+				// Optional country filter
+				const cc = countryCodeInput.value.trim().toLowerCase();
+				if (cc) {
+					url += '&countrycodes=' + encodeURIComponent(cc);
+				}
+
+				// Prioritize current viewport bounds (soft bias: bounded=0)
+				const bounds = pickerMap.getBounds();
+				const viewbox = [
+					bounds.getWest().toFixed(5),
+					bounds.getNorth().toFixed(5),
+					bounds.getEast().toFixed(5),
+					bounds.getSouth().toFixed(5)
+				].join(',');
+				url += '&viewbox=' + viewbox + '&bounded=0';
+
+				return url;
+			}
+
+			function performFetch(query, callback) {
+				const url = buildNominatimUrl(query);
+				fetch(url)
+					.then(res => res.json())
+					.then(data => callback(data || []))
+					.catch(() => callback([]));
+			}
+
+			// Debounced input watcher for suggestions
+			searchInput.addEventListener('input', function() {
+				const val = this.value.trim();
+				clearTimeout(debounceTimer);
+				if (val.length < 3) {
+					closeAutocomplete();
+					return;
+				}
+
+				debounceTimer = setTimeout(() => {
+					performFetch(val, function(results) {
+						currentResults = results;
+						autocompleteList.innerHTML = '';
+						if (results.length === 0) {
+							const noRes = document.createElement('div');
+							noRes.className = 'mc-autocomplete-item';
+							noRes.style.color = '#888';
+							noRes.innerText = '<?php echo addslashes(i18n_r('mapCreator/LANG_Search_No_Results')); ?>';
+							autocompleteList.appendChild(noRes);
+						} else {
+							results.forEach((item) => {
+								const div = document.createElement('div');
+								div.className = 'mc-autocomplete-item';
+								div.innerText = item.display_name;
+								div.addEventListener('click', () => selectResult(item));
+								autocompleteList.appendChild(div);
+							});
+						}
+						autocompleteList.style.display = 'block';
+					});
+				}, 350);
+			});
+
+			// Dismiss autocomplete when clicking outside
+			document.addEventListener('click', function(e) {
+				if (!searchInput.contains(e.target) && !autocompleteList.contains(e.target)) {
+					closeAutocomplete();
+				}
+			});
+
+			// Manual search button / Enter key fallback
+			function submitManualSearch() {
+				const query = searchInput.value.trim();
+				if (!query) return;
+				performFetch(query, function(results) {
+					if (results.length > 0) {
+						selectResult(results[0]);
+					} else {
+						alert('<?php echo addslashes(i18n_r('mapCreator/LANG_Search_No_Results')); ?>');
+					}
+				});
+			}
+
+			document.getElementById('btnPickerSearch').addEventListener('click', submitManualSearch);
+			searchInput.addEventListener('keydown', function(e) {
+				if (e.key === 'Enter') {
+					e.preventDefault();
+					submitManualSearch();
+				}
+			});
+
+			// Browser Geolocation
+			document.getElementById('btnLocateGps').addEventListener('click', function() {
+				if (!navigator.geolocation) {
+					alert('<?php echo addslashes(i18n_r('mapCreator/LANG_Geolocation_Fail')); ?>');
+					return;
+				}
+				navigator.geolocation.getCurrentPosition(function(pos) {
+					const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
+					pickerMap.setView(latlng, 15);
+					setOrMoveMarker(latlng);
+				}, function(err) {
+					alert('<?php echo addslashes(i18n_r('mapCreator/LANG_Geolocation_Fail')); ?>');
+				}, { enableHighAccuracy: true, timeout: 8000 });
 			});
 
 			document.getElementById('btnUseCenter').addEventListener('click', function() {
@@ -445,7 +643,7 @@ function mapCreator()
 			const rowHtml = `
 				<div class='mc-card' id='point_box_${uid}'>
 					<input type='hidden' name='point_uids[]' value='${uid}'>
-					<button class='closeitem' style='position:absolute; right:10px; top:10px; background:#D61C4E; color:#fff; border:none; padding:4px 8px; cursor:pointer;' onclick='event.preventDefault(); document.getElementById("point_box_${uid}").remove();'>&times;</button>
+					<div style="margin-bottom:20px"><button class='closeitem' style='position:absolute; right:10px; top:10px; background:#D61C4E; color:#fff; border:none; padding:4px 8px; cursor:pointer; border-radius:4px;' onclick='event.preventDefault(); document.getElementById("point_box_${uid}").remove();'>&times;</button></div>
 					<div class='mc-row'>
 						<div style='flex:2;'>
 							<label><?php echo addslashes(i18n_r('mapCreator/LANG_Marker_Coordinates')); ?>:</label>
@@ -505,10 +703,10 @@ function mapCreator()
 			echo "<div style='display:flex; justify-content:space-between; align-items:center;'>";
 			echo "<h3 style='margin:0;'>" . htmlspecialchars($filename) . " " . ($isJson ? "<span class='mc-badge'>JSON</span>" : "<span class='mc-badge' style='background:#f57c00;'>Legacy TXT</span>") . "</h3>";
 			echo "<div>";
-			echo "<a href='load.php?id=mapCreator&edit=" . urlencode($filename) . "' style='background:#003865; color:#fff; padding:6px 10px; text-decoration:none; margin-right:5px;'>" . i18n_r('mapCreator/LANG_Edit') . "</a>";
+			echo "<a href='load.php?id=mapCreator&edit=" . urlencode($filename) . "' style='font-size:14px; background:#FFAD33; color:#fff; padding:6px 10px; text-decoration:none; margin-right:5px; border-radius:4px;'><svg xmlns='http://www.w3.org/2000/svg' style='vertical-align:middle' width='1.2em' height='1.2em' viewBox='0 0 24 24'><path d='M0 0h24v24H0z' fill='none'/><path fill='currentColor' d='M7.5 2.717L2 5.926V21.5l5.5-2.267zm2 16.193l1 .59v-.955l4-4V5.09l-5-2.953zM22 2.5v8.97l-2.213-2.212l-3.287 3.287V4.767zm1.914 13.714l-4.127-4.128l-7.287 7.287l.001 4.127h4.127zm-6.463 1.036l1.299 1.3l-2.95 2.95h-1.3v-1.3z'/></svg> " . i18n_r('mapCreator/LANG_Edit') . "</a>";
 			echo "<form method='POST' action='load.php?id=mapCreator' style='display:inline;' onsubmit='return confirm(\"" . addslashes(i18n_r('mapCreator/LANG_Are_You_Sure')) . "\");'>";
 			echo "<input type='hidden' name='map_file' value='" . htmlspecialchars($filepath) . "'>";
-			echo "<input type='submit' name='deletemap' value='" . i18n_r('mapCreator/LANG_Delete_Map') . "' style='background:#D61C4E; color:#fff; border:none; padding:6px 10px; cursor:pointer;'>";
+			echo "<button type='submit' name='deletemap' value='1' style='font-size:14px; background:#D61C4E!important; color:#fff; border:none; padding:6px 10px; cursor:pointer; border-radius:4px; display:inline-flex; align-items:center; gap:6px;'><svg xmlns='http://www.w3.org/2000/svg' style='vertical-align:middle'  width='1.2em' height='1.2em' viewBox='0 0 24 24'><path d='M0 0h24v24H0z' fill='none'/><path fill='currentColor' d='M6.5 2.717L1 5.926V21.5l5.5-2.267zm2 16.193l5 2.953v-.173a6.48 6.48 0 0 1-2-4.69a6.48 6.48 0 0 1 2-4.69V5.09l-5-2.952zM21 2.5v8.732a6.5 6.5 0 0 0-3-.732a6.5 6.5 0 0 0-2.5.498v-6.23zm-.171 10.257L18 15.586l-2.828-2.829l-1.414 1.415L16.586 17l-2.828 2.828l1.414 1.415L18 18.414l2.829 2.829l1.414-1.415L19.415 17l2.828-2.828z'/></svg>" . i18n_r('mapCreator/LANG_Delete_Map') . "</button>";
 			echo "</form>";
 			echo "</div>";
 			echo "</div>";
@@ -525,7 +723,7 @@ function mapCreator()
 	}
 
 	echo '
-		<form action="https://www.paypal.com/cgi-bin/webscr" class="moneyshot" method="post" target="_top" style="display:flex; flex-direction:column; margin-top:10px; padding:20px; box-sizing:border-box; width:100%; align-items:center; justify-content:space-between; background:#D61C4E; color:#fff;">
+		<form action="https://www.paypal.com/cgi-bin/webscr" class="moneyshot" method="post" target="_top" style="display:flex; flex-direction:column; padding: 5px 0 15px; border-radius:4px; box-sizing:border-box; width:100%; align-items:center; justify-content:space-between; background:#D61C4E; color:#fff;">
 			<p style="margin:0; padding:10px;">' . i18n_r('mapCreator/LANG_PayPal') . '</p>
 			<input type="hidden" name="cmd" value="_s-xclick" />
 			<input type="hidden" name="hosted_button_id" value="KFZ9MCBUKB7GL" />
